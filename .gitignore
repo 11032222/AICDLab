@@ -1,9 +1,23 @@
-Intresting Images/
-Testing Data/
+# Data directories
 Training Data/
 Validation Data/
+Testing Data/
+Interesting Images/
+
+# Training artifacts
 artifacts/
 _csv/
 checkpoints/
+
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
