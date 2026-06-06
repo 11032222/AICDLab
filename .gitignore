@@ -1,4 +1,9 @@
-intresting images/
-Testung Data/
+Intresting Images/
+Testing Data/
 Training Data/
 Validation Data/
+artifacts/
+_csv/
+checkpoints/
+__pycache__/
+*.pyc
