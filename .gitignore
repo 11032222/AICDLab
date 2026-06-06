@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+
+Data/
+data/
+archive.zip
+*.zip
+
+artifacts/
+outputs/
+outputs_*/
+reports/
+
+*.pt
+*.pth
