@@ -8,9 +8,11 @@ from torchvision.models import (
     EfficientNet_B0_Weights,
     EfficientNet_B7_Weights,
     ResNet18_Weights,
+    ViT_B_16_Weights,
     efficientnet_b0,
     efficientnet_b7,
     resnet18,
+    vit_b_16,
 )
 from torchvision.transforms import InterpolationMode
 
@@ -262,6 +264,43 @@ class EfficientNetMambaVisionClassifier(nn.Module):
         return self.head(self.forward_features(x))
 
 
+class ViTBinaryClassifier(nn.Module):
+    """ViT-B/16 with pretrained ImageNet weights, binary classification head."""
+
+    def __init__(self, num_classes: int = 2, freeze_backbone: bool = False) -> None:
+        super().__init__()
+        weights = ViT_B_16_Weights.IMAGENET1K_V1
+        self.vit = vit_b_16(weights=weights)
+        in_features = self.vit.heads.head.in_features
+        self.vit.heads.head = nn.Linear(in_features, num_classes)
+        if freeze_backbone:
+            for name, param in self.vit.named_parameters():
+                if 'heads' not in name:
+                    param.requires_grad = False
+
+    def set_backbone_trainable(self, trainable: bool) -> None:
+        for name, param in self.vit.named_parameters():
+            param.requires_grad = trainable or name.startswith("heads.")
+
+    def parameter_groups(self, lr: float, weight_decay: float, backbone_lr_scale: float) -> list[dict[str, object]]:
+        head_params = []
+        backbone_params = []
+        for name, param in self.vit.named_parameters():
+            if name.startswith("heads."):
+                head_params.append(param)
+            else:
+                backbone_params.append(param)
+        groups: list[dict[str, object]] = []
+        if backbone_params:
+            groups.append({"params": backbone_params, "lr": lr * backbone_lr_scale, "weight_decay": weight_decay})
+        if head_params:
+            groups.append({"params": head_params, "lr": lr, "weight_decay": weight_decay})
+        return groups
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.vit(x)
+
+
 class TorchvisionClassifier(nn.Module):
     def __init__(self, model: nn.Module, head_kind: str, num_classes: int) -> None:
         super().__init__()
@@ -281,6 +320,12 @@ class TorchvisionClassifier(nn.Module):
             self.model.fc = nn.Linear(in_features, num_classes)
             nn.init.trunc_normal_(self.model.fc.weight, std=0.02)
             nn.init.zeros_(self.model.fc.bias)
+            return
+        if self.head_kind == "vit":
+            in_features = self.model.heads.head.in_features
+            self.model.heads.head = nn.Linear(in_features, num_classes)
+            nn.init.trunc_normal_(self.model.heads.head.weight, std=0.02)
+            nn.init.zeros_(self.model.heads.head.bias)
             return
         raise ValueError(f"Unsupported head kind: {self.head_kind}")
 
@@ -320,6 +365,8 @@ def get_model_data_config(model_name: str, image_size: int) -> ModelDataConfig:
         return ModelDataConfig(image_size=600, eval_resize_size=600, interpolation=InterpolationMode.BICUBIC)
     if normalized == "efficientnet_b0":
         return ModelDataConfig(image_size=224, eval_resize_size=256, interpolation=InterpolationMode.BICUBIC)
+    if normalized == "vit":
+        return ModelDataConfig(image_size=224, eval_resize_size=256, interpolation=InterpolationMode.BILINEAR)
     if normalized == "resnet18":
         return ModelDataConfig(
             image_size=image_size,
@@ -363,6 +410,8 @@ def build_model(
             raise ValueError("efficientnet_b0 uses image_size=224. Omit --image-size or pass 224.")
         weights = EfficientNet_B0_Weights.DEFAULT if pretrained else None
         return TorchvisionClassifier(efficientnet_b0(weights=weights), head_kind="efficientnet", num_classes=num_classes)
+    if normalized == "vit":
+        return ViTBinaryClassifier(num_classes=num_classes)
     if normalized == "resnet18":
         weights = ResNet18_Weights.DEFAULT if pretrained else None
         return TorchvisionClassifier(resnet18(weights=weights), head_kind="resnet", num_classes=num_classes)

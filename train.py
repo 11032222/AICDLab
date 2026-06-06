@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import time
 from pathlib import Path
@@ -30,9 +31,13 @@ TRAINING_OUTPUT_ROOT = Path("artifacts") / "training_outputs"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train an animal image binary classifier.")
-    parser.add_argument("--train-csv", type=Path, required=True)
-    parser.add_argument("--val-csv", type=Path, required=True)
-    parser.add_argument("--model", choices=["mamba", "efficientnet_b7", "efficientnet_b0", "resnet18"], default="mamba")
+    parser.add_argument("--train-csv", type=Path, default=None, help="CSV for training (auto-generated if --class1/--class2 given)")
+    parser.add_argument("--val-csv", type=Path, default=None, help="CSV for validation (auto-generated if --class1/--class2 given)")
+    parser.add_argument("--class1", type=str, default=None, help="First class name, e.g. Cat")
+    parser.add_argument("--class2", type=str, default=None, help="Second class name, e.g. Dog")
+    parser.add_argument("--train-dir", type=Path, default=Path("Training Data"), help="Training data root dir")
+    parser.add_argument("--val-dir", type=Path, default=Path("Validation Data"), help="Validation data root dir")
+    parser.add_argument("--model", choices=["vit", "mamba", "efficientnet_b7", "efficientnet_b0", "resnet18"], default="vit")
     parser.add_argument(
         "--mamba-architecture",
         choices=["hybrid", "patch"],
@@ -478,6 +483,28 @@ def main() -> None:
     args.image_size = image_size
     args.eval_resize_size = eval_resize_size
     args.interpolation = interpolation.name
+
+    # Auto-generate CSVs from directory structure if --class1/--class2 given
+    if args.train_csv is None and args.class1 and args.class2:
+        os.makedirs('_csv', exist_ok=True)
+        for split_name, dir_path in [('train', args.train_dir), ('val', args.val_dir)]:
+            rows = []
+            for label, cls in [(0, args.class1), (1, args.class2)]:
+                cls_dir = dir_path / cls
+                if cls_dir.exists():
+                    for fname in sorted(os.listdir(cls_dir)):
+                        if fname.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.webp')):
+                            rows.append({"image_path": str((cls_dir / fname).resolve()), "label": label, "class_name": cls})
+            csv_path = Path(f'_csv/{split_name}.csv')
+            pd.DataFrame(rows).to_csv(csv_path, index=False)
+            if split_name == 'train':
+                args.train_csv = csv_path
+            else:
+                args.val_csv = csv_path
+            log_message(f"Generated {csv_path} with {len(rows)} samples")
+
+    if args.train_csv is None or args.val_csv is None:
+        raise ValueError("Provide --train-csv/--val-csv OR --class1/--class2 for auto-CSV generation.")
 
     inferred_num_classes = infer_num_classes(args.train_csv, args.val_csv)
     num_classes = args.num_classes or inferred_num_classes
